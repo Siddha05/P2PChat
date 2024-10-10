@@ -1,0 +1,6 @@
+@P2PChat.Server_HostAddress = http://localhost:5161
+
+GET {{P2PChat.Server_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
