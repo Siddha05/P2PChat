@@ -1,22 +1,22 @@
 import React from 'react';
 import propTypes from 'prop-types';
 
-function ChatControls({ text, onTextChanged, onSend, onConnect}) {
+function ChatControls({ text, onTextChanged, onSend, onConnect, isConnect}) {
   return (
       <div style={{
           display: 'grid',
           gap: '10px',
-          gridTemplateColumns: '300px auto auto',
+          gridTemplateColumns: '300px auto auto auto',
           marginTop: '10px'
       }}>
           <input type='text' value={text} onChange={e => onTextChanged(e.target.value)} style={{gridColumn: '1', borderRadius: '5px'} }/>
           <button disabled={!text} onClick={onSend} style={{gridColumn: '2', width: '100px'} }>Send</button>
-          <button onClick={onConnect} style={{gridColumn: '3', width: '100px'} }>Connect</button>
+          <button disabled={isConnect} onClick={onConnect} style={{gridColumn: '3', width: '100px'} }>Connect</button>
 
       </div>
   );
 }
 
-ChatControls.propTypes = { onSend: propTypes.func, onConnect: propTypes.func, text: propTypes.string, onTextChanged: propTypes.func}
+ChatControls.propTypes = { onSend: propTypes.func, onConnect: propTypes.func, text: propTypes.string, onTextChanged: propTypes.func, isConnect: propTypes.bool}
 
 export default ChatControls;

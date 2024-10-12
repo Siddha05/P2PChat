@@ -9,124 +9,125 @@ function App() {
     const [text, setText] = useState('');
     const [isConnect, setisConnect] = useState(false);
     const [hub, setHub] = useState(null);
-    //const [peerConnection, setPeerConnection] = useState();
-    const [userName, setUserName] = useState('Apollo');
-    //const [otherUser, setOtherUser] = useState();
-    //const [dataChannel, setDataChannel] = useState();
+    const [peerConnection, setPeerConnection] = useState();
+    const [user, setUser] = useState({ Name: 'Apollo' });
+    const [reload, setReload] = useState(0);
+    const [dataChannel, setDataChannel] = useState();
 
-    var dataChannel;
-    var peerConnection;
-    var otherUser;
-
-    const RTCconfig = {
+    const servers = {
         iceServers: [
             { url: 'stun:stun.l.google.com:19302' }
         ]
     };
-
     useEffect(() => {
-        //setMessages(["Connecting to server..."]);
+        let peerConn = new RTCPeerConnection(servers);
+        let data = peerConn.createDataChannel("chat");
+        setDataChannel(data);
+        setPeerConnection(peerConn);
+    }, [reload]);
+    useEffect(() => {
         const connection = new HubConnectionBuilder().withUrl('https://localhost:7036/signal').withAutomaticReconnect().build();
         connection.start().then(result => {
             setHub(connection);
             console.log('Connection established');
-            //connection.on("on_user_add", msg => {
-            //    setOtherUser(msg);
-            //    sendOffer();
-            //    //peerConnection.createOffer().then(desc => {
-            //    //    peerConnection.setLocalDescription(desc);
-            //    //    console.log("Local description", desc);
-            //    //    hub.invoke("SendSignal", desc, otherUser.ConnectionID);
-            //    //    console.log("Ready to connect");
-            //    //})
-            //});
-            //connection.on("on_signal", msg => {
-            //    console.log("Got Signal", msg);
-            //});
-            //connection.on("on_ready", () => {
-            //    console.log("Ready to connect");
-            //    peerConnection.createOffer().then(desc => {
-            //        peerConnection.setLocalDescription(desc);
-            //        console.log("Local description", desc);
-            //        hub.invoke("SendSignal", desc, otherUser.ConnectionID);
-            //        console.log("Ready to connect");
-            //    }
-
-            //    );
-            //    //const offer = await peerConnection.createOffer();
-            //    //await peerConnection.setLocalDescription(offer);
-            //    //console.log("Created offer", offer);
-            //    //hub.invoke("SendSignal", offer, otherUser.ConnectionID);
-            //});
         }).catch(e => console.log('Connection failed: ', e));
-    }, []);
+    }, [reload]);
     
-    function send(){
-        //setMessages([...messages, text]);
-        //setText("");
+    const send = () => {
+        let msg = `${user.Name}: ${text}`;
+        setMessages([...messages, msg]);
+        dataChannel.send(msg);
+        setText("");
         
     }
-    function connect(){
-        hub.on("on_user_add", onAddUser);
-        hub.on("on_signal", onGotSignal);
-       
-        let peerConn = new RTCPeerConnection(RTCconfig);
-        let data = peerConn.createDataChannel("chat");
-        peerConn.onicecandidate = event => {
+    const onAddUser = (user) => {
+        setMessages([...messages, `New user connected ${user}`]);
+        sendOffer();
+    }
+    const connect = () => {
+        configureHub();
+        configurePeer();
+        hub.invoke("NewUser", JSON.stringify(user)).then(() => setMessages([...messages, 'Connected to signal server'])).catch(e => showError(e));
+        
+    }
+    function configurePeer() {
+        peerConnection.onicecandidate = event => {
             if (event.candidate) {
-                console.log("Got candidate", event.candidate);
-                hub.invoke("SendSignal", JSON.stringify(event.candidate), otherUser.ConnectionID);
+                hub.invoke("SendSignal", JSON.stringify(event.candidate));
             }
         }
-        data.onopen = channelState;
-        data.onclose = channelState;
-        data.onmessage = msg => console.log(msg);
-        dataChannel =data;
-        peerConnection = peerConn;
-        hub.invoke("NewUser", userName).then(() => setMessages([...messages, 'Connected to signal server'])).catch(e => ShowError(e));
+        dataChannel.onopen = handleChannelState;
+        dataChannel.onclose = handleChannelState;
+        peerConnection.ondatachannel = receiveCallback;
+        dataChannel.onmessage = handleOnMessage;
         
     }
-    function ShowError(e) {
-        console.log(e);
+    function configureHub() {
+        hub.on("on_connected", msg => setUser({ ...user, ConnectionID: msg }));
+        hub.on("on_user_add", onAddUser);
+        hub.on("on_signal", onGotSignal);
     }
-    function onAddUser(user) {
-        console.log("New User", user);
-        var u = JSON.parse(user);
-        otherUser = u;
-        sendOffer(u);
-        
+    function receiveCallback(e) {
+        let ch = e.channel;
+        ch.onmessage = handleOnMessage;
+        ch.onopen = handleChannelState;
+        ch.onclose = handleChannelState;
+        setDataChannel(ch);
     }
+    const showError = (e) => console.log(e);
+
     async function onGotSignal(signal) {
         
         var obj = JSON.parse(signal);
-        if (obj.type) {
+        if (obj.sdp) {
             if (obj.type === "offer") {
+                await peerConnection.setRemoteDescription(obj);
                 var answer = await peerConnection.createAnswer();
                 console.log("Create answer", answer);
-                peerConnection.setLocalDescription(answer);
-                hub.invoke("SendSignal", JSON.stringify(answer), user.ConnectionID);
+                await peerConnection.setLocalDescription(answer);
+                hub.invoke("SendSignal", JSON.stringify(answer)).catch(e => showError(e));
             }
+            else if (obj.type === "answer") {
+                peerConnection.setRemoteDescription(obj);
+            }
+
+        }
+        else if (obj.candidate) {
+            peerConnection.addIceCandidate(obj).catch(e => showError(e));
         }
     }
 
     const textChanged = (val) => {
         setText(val);
     }
-    function channelState() {
-        console.log("Channel state is", dataChannel.readyState);
+    function handleChannelState() {
+        setMessages([...messages, `Channel state: ${dataChannel.readyState}`]);
+        if (dataChannel.readyState === 'open') {
+            setisConnect(true);
+        }
+        else {
+            setisConnect(false);
+            clearState();
+        }
     }
-    async function sendOffer(user) {
+    function handleOnMessage(e) {
+        setMessages([...messages, e.data]);
+    }
+    function clearState() {
+        setReload(reload + 1);
+    }
+    const sendOffer = async () => {
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
-        hub.invoke("SendSignal", JSON.stringify(offer), user.ConnectionID);
+        hub.invoke("SendSignal", JSON.stringify(offer)).catch(e => showError(e));
     }
     
     return (
         <div>
-            <h1>P2P Chat</h1>
+            <h2>P2P Chat</h2>
             <div style={{display: 'flex', margin: '0.5rem', fontSize: '20px'}}>
                 <label htmlFor="name">You name:</label>
-                <input type="input" value= {userName} id="name" onChange={e => setUserName(e.target.value)} style={{marginLeft: '10px'}} />
+                <input type="input" value={user.Name} id="name" onChange={e => setUser({...user, Name: e.target.value})} style={{marginLeft: '10px'}} />
             </div>
             <MessageList messages={messages} />
             <ChatControls onSend={send} onConnect={connect} text={text} onTextChanged={textChanged} isConnect={ isConnect} />
