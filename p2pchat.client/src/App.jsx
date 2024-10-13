@@ -40,6 +40,16 @@ function App() {
         setText("");
         
     }
+    const handleChannelState = () => {
+        setMessages([...messages, `Channel state: ${dataChannel.readyState}`]);
+        if (dataChannel.readyState === 'open') {
+            setisConnect(true);
+        }
+        else {
+            setisConnect(false);
+            clearState();
+        }
+    }
     const onAddUser = (user) => {
         setMessages([...messages, `New user connected ${user}`]);
         sendOffer();
@@ -58,8 +68,16 @@ function App() {
         }
         dataChannel.onopen = handleChannelState;
         dataChannel.onclose = handleChannelState;
-        peerConnection.ondatachannel = receiveCallback;
-        dataChannel.onmessage = handleOnMessage;
+        peerConnection.ondatachannel = e => {
+            let ch = e.channel;
+            ch.onmessage = handleOnMessage;
+            ch.onopen = handleChannelState;
+            ch.onclose = handleChannelState;
+            setDataChannel(ch);
+        };
+        dataChannel.onmessage = (e) => {
+            setMessages([...messages, e.data]);
+        }
         
     }
     function configureHub() {
@@ -100,17 +118,8 @@ function App() {
     const textChanged = (val) => {
         setText(val);
     }
-    function handleChannelState() {
-        setMessages([...messages, `Channel state: ${dataChannel.readyState}`]);
-        if (dataChannel.readyState === 'open') {
-            setisConnect(true);
-        }
-        else {
-            setisConnect(false);
-            clearState();
-        }
-    }
-    function handleOnMessage(e) {
+    
+    const handleOnMessage = (e) => {
         setMessages([...messages, e.data]);
     }
     function clearState() {
@@ -129,7 +138,7 @@ function App() {
                 <label htmlFor="name">You name:</label>
                 <input type="input" value={user.Name} id="name" onChange={e => setUser({...user, Name: e.target.value})} style={{marginLeft: '10px'}} />
             </div>
-            <MessageList messages={messages} />
+            <MessageList key='mgs' messages={messages} />
             <ChatControls onSend={send} onConnect={connect} text={text} onTextChanged={textChanged} isConnect={ isConnect} />
         </div>
     );
