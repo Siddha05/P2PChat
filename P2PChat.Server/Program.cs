@@ -9,7 +9,6 @@ namespace P2PChat.Server
             var builder = WebApplication.CreateBuilder(args);
 
             // Add services to the container.
-            //builder.Services.AddAuthorization();
             builder.Services.AddSignalR();
             builder.Services.AddCors(options =>
             {
@@ -26,9 +25,7 @@ namespace P2PChat.Server
 
             // Configure the HTTP request pipeline.
 
-            app.UseHttpsRedirection();
-            //app.UseAuthorization();
-           
+            app.UseHttpsRedirection();      
             app.UseRouting();
             app.MapHub<SignalHub>("/signal");
             app.MapFallbackToFile("/index.html");

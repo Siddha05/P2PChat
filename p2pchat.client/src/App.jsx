@@ -1,8 +1,9 @@
 ﻿import { HubConnectionBuilder } from '@microsoft/signalr';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import './App.css';
 import ChatControls from './ChatControls.jsx';
 import MessageList from './MessageList.jsx';
+import ChatHeader from './ChatHeader';
 
 function App() {
     const [messages, setMessages] = useState([]);
@@ -11,44 +12,105 @@ function App() {
     const [hub, setHub] = useState(null);
     const [peerConnection, setPeerConnection] = useState();
     const [user, setUser] = useState({ Name: 'Apollo' });
-    const [reload, setReload] = useState(0);
+    const [isConnecting, setIsConnecting] = useState(false);
     const [dataChannel, setDataChannel] = useState();
+    const fileBuffer = useRef([]);
+    const received_size = useRef(0);
+    const downloading_file = useRef(null);
+    const header_size = useRef(0);
 
     const servers = {
         iceServers: [
             { url: 'stun:stun.l.google.com:19302' }
         ]
     };
-    useEffect(() => {
-        
-    }, [hub]);
-    useEffect(() => {
-        //setMessages([...messages]);
-    }, [messages]);
     
     const send = () => {
-        let msg = `${user.Name}: ${text}`;
+        let msg = `${user.Name} --> ${text}`;
         setMessages([...messages, msg]);
         dataChannel.send(msg);
         setText("");
-        //trace('Send');
-        
     }
+    const sendFile = (fileinput) => {
+        let file = fileinput.current.files[0];
+        if (!file) return;
+        const chunkSize = 16384;
+        const int32Size = 4;
+        let encode_str = new TextEncoder().encode(file.name);
+        let header = new ArrayBuffer(encode_str.byteLength + int32Size);
+        let view = new DataView(header);
+        view.setInt32(0, file.size);
+        for (var i = 0; i < encode_str.byteLength; i++) {
+            view.setInt8(i +int32Size, encode_str[i]);
+        }
+        dataChannel.send(header);
+        console.log(`Sending downloading_file: ${[file.name, file.size, file.type].join(' ')}`);
+        setMessages(messages => [...messages, `Start downloading file ${file.name} (${file.size} B)`]);
+        let reader = new FileReader();
+        let offset = 0;
+        reader.addEventListener('load', e => {
+            dataChannel.send(e.target.result);
+            offset += e.target.result.byteLength;
+            if (offset < file.size) {
+                readSlice(offset);
+            }
+        });
+        const readSlice = o => {
+            const slice = file.slice(offset, o + chunkSize);
+            reader.readAsArrayBuffer(slice);
+        };
+        readSlice(0);
+        setMessages(messages => [...messages, `Download compleated`]);
+    };
     
     const trace = (name) => {
         console.log(`${name} hub`, hub);
         console.log(`${name} peer`, peerConnection);
 
     }
-    function handleChannelState(channel) {
-        setMessages(messages => [...messages, `Channel state: ${channel.readyState}`]);
-        if (channel.readyState === 'open') {
-            setIsConnected(true);
+    //function handleChannelState(channel) {
+    //    setMessages(messages => [...messages, `Channel state: ${channel.readyState}`]);
+    //    if (channel.readyState === 'open') {
+    //        setIsConnected(true);
+    //    }
+    //    else {
+    //        setIsConnected(false);
+    //        clearState();
+    //    }
+    //}
+    const handleOnMessage = e => {
+        if (typeof e.data === 'object') {
+            if (received_size.current === 0) {
+                //this is header with file description
+                let view = new DataView(e.data);
+                let size = view.getInt32(0);
+                var decoder = new TextDecoder("utf-8");
+                view = new DataView(e.data, 4);
+                let filename = decoder.decode(view);
+                console.log("Start downloading file ", `${filename} ${size} B`);
+                received_size.current += e.data.byteLength;
+                header_size.current = e.data.byteLength;
+                downloading_file.current = { Name: filename, Size: size };
+                setMessages(messages => [...messages, `Start downloading file ${downloading_file.current.Name} (${downloading_file.current.Size} B)`]);
+            }
+            else {
+                
+                received_size.current += e.data.byteLength;
+                console.log("Download chunk", `Current ${e.data.byteLength} Total ${received_size.current}`);
+                if (received_size.current >= downloading_file.current.Size) {
+                    setMessages(messages => [...messages, `Download compleated`]);
+                    //here handle fileBuffer
+                    downloading_file.current = 0;
+                    received_size.current = 0;
+                    fileBuffer.current = [];
+                }
+                else {
+                    fileBuffer.current.push(e.data);
+                }
+            }
+            return;
         }
-        else {
-            setIsConnected(false);
-            clearState();
-        }
+        setMessages(messages => [...messages, e.data]);
     }
     async function createHubConnection() {
         const connection = new HubConnectionBuilder().withUrl('https://localhost:7036/signal').withAutomaticReconnect().build();
@@ -57,12 +119,13 @@ function App() {
             return connection;
         }
         catch (e) {
-            showError(e);
+            logError(e);
             return null;
         }
     }
     
     const connect = async () => {
+        setIsConnecting(isConnecting => !isConnecting);
         let connection;
         if (!hub) {
             connection = await createHubConnection();
@@ -75,136 +138,89 @@ function App() {
             setMessages([...messages, 'No connection to signal server']);
             return;
         }
+        //trace("Connect");
         connection.on("on_connected", msg => setUser({ ...user, ConnectionID: msg }));
         let peerConn = new RTCPeerConnection(servers);
         let data = await peerConn.createDataChannel("chat");
         data.onopen = () => {
-            setMessages(messages => [...messages, `Channel state: open`]);
                 setIsConnected(true);
         };
         data.onclose = () => {
-            setMessages(messages => [...messages, `Channel state: close`]);
             setIsConnected(false);
         };
         peerConn.onicecandidate = event => {
             if (event.candidate) {
-                setMessages(messages => [...messages, 'Send ICE candidate']);
                 connection.invoke("SendSignal", JSON.stringify(event.candidate));
             }
         };
         peerConn.ondatachannel = e => {
             let ch = e.channel;
-            ch.onmessage = (e) => setMessages(messages => [...messages, e.data]);
+            ch.onmessage = (e) => handleOnMessage(e);
             ch.onopen = () => {
-                setMessages(messages => [...messages, `Channel state: open`]);
                 setIsConnected(true);
             };
             ch.onclose = () => {
-                setMessages(messages => [...messages, `Channel state: close`]);
                 setIsConnected(false);
             };
             setDataChannel(ch);
         };
-        data.onmessage = (e) => setMessages(messages => [...messages, e.data]);
+        data.onmessage = (e) => handleOnMessage(e);
         connection.on("on_user_add", async msg => {
-            const offer = await peerConn.createOffer();
-            await peerConn.setLocalDescription(offer);
-            setMessages(messages => [...messages, 'Send SDP offer']);
-            connection.invoke("SendSignal", JSON.stringify(offer)).catch(e => showError(e));
+            console.log("New user added", msg);
         });
         connection.on("on_signal", async signal => {
+            if (isConnected) return;
             var obj = JSON.parse(signal);
             if (obj.sdp) {
                 if (obj.type === "offer") {
                     await peerConn.setRemoteDescription(obj);
                     var answer = await peerConn.createAnswer();
                     await peerConn.setLocalDescription(answer);
-                    setMessages(messages => [...messages, 'Send SDP answer']);
-                    connection.invoke("SendSignal", JSON.stringify(answer)).catch(e => showError(e));
+                    connection.invoke("SendSignal", JSON.stringify(answer)).catch(e => logError(e));
                 }
                 else if (obj.type === "answer") {
-                    peerConn.setRemoteDescription(obj);
+                    await peerConn.setRemoteDescription(obj);
                 }
             }
             else if (obj.candidate) {
-                peerConn.addIceCandidate(obj).catch(e => showError(e));
+                peerConn.addIceCandidate(obj).catch(e => logError(e));
             }
         });
         try {
             await connection.invoke("NewUser", JSON.stringify(user));
-            setMessages([...messages, 'Connection to signal server established']);
         } catch (e) {
-            showError(e);
+            logError(e);
             setMessages([...messages, 'Connection to signal server failed']);
         }
+        const offer = await peerConn.createOffer();
+        await peerConn.setLocalDescription(offer);
+        connection.invoke("SendSignal", JSON.stringify(offer)).catch(e => logError(e));
         setDataChannel(data);
         setPeerConnection(peerConn);
+        setIsConnecting(isConnecting => !isConnecting);
     }
     const disconnect = () => {
         dataChannel.close();
         clearState();
         setIsConnected(false);
-    }
-    
-    
-    function receiveCallback(e) {
-        let ch = e.channel;
-        ch.onmessage = handleOnMessage;
-        ch.onopen = handleChannelState;
-        ch.onclose = handleChannelState;
-        setDataChannel(ch);
-    }
-    const showError = (e) => console.log(e);
-
-    async function onGotSignal(signal) {
-        
-        var obj = JSON.parse(signal);
-        if (obj.sdp) {
-            if (obj.type === "offer") {
-                await peerConnection.setRemoteDescription(obj);
-                var answer = await peerConnection.createAnswer();
-                await peerConnection.setLocalDescription(answer);
-                hub.invoke("SendSignal", JSON.stringify(answer)).catch(e => showError(e));
-            }
-            else if (obj.type === "answer") {
-                peerConnection.setRemoteDescription(obj);
-            }
-
-        }
-        else if (obj.candidate) {
-            peerConnection.addIceCandidate(obj).catch(e => showError(e));
-        }
-    }
+    }  
+    const logError = (e) => console.log(e);
 
     const textChanged = (val) => {
         setText(val);
-    }
-    
-    const handleOnMessage = (e) => {
-        let msg = localStorage.getItem("messages");
-        localStorage.setItem('msg', msg + '\n' + e.data);
-        setMessages([...messages, e.data]);
     }
     function clearState() {
         setPeerConnection(null);
         setDataChannel(null);
     }
-    async function sendOffer(){
-        //trace('sendOffer');
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        hub.invoke("SendSignal", JSON.stringify(offer)).catch(e => showError(e));
-    }
-    
+
     return (
         <div>
             <h2>P2P Chat</h2>
-            <div style={{display: 'flex', margin: '0.5rem', fontSize: '20px'}}>
-                <label htmlFor="name">You name:</label>
-                <input type="input" value={user.Name} id="name" onChange={e => setUser({...user, Name: e.target.value})} style={{marginLeft: '10px'}} />
-            </div>
+            <ChatHeader user={user} setUser={setUser} isConnected={ isConnected} />
             <MessageList key='mgs' messages={messages} />
-            <ChatControls onSend={send} onConnect={connect} text={text} onTextChanged={textChanged} isConnect={isConnected} onDisconnect={ disconnect} />
+            <ChatControls onSend={send} onConnect={connect} text={text} onTextChanged={textChanged} isConnect={isConnected} isConnecting={isConnecting}
+                onDisconnect={disconnect} onSendFile={sendFile} />
         </div>
     );
     
