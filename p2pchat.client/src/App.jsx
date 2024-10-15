@@ -34,6 +34,7 @@ function App() {
     const sendFile = (fileinput) => {
         let file = fileinput.current.files[0];
         if (!file) return;
+        //first create and send header with metadata
         const chunkSize = 16384;
         const int32Size = 4;
         let encode_str = new TextEncoder().encode(file.name);
@@ -68,16 +69,7 @@ function App() {
         console.log(`${name} peer`, peerConnection);
 
     }
-    //function handleChannelState(channel) {
-    //    setMessages(messages => [...messages, `Channel state: ${channel.readyState}`]);
-    //    if (channel.readyState === 'open') {
-    //        setIsConnected(true);
-    //    }
-    //    else {
-    //        setIsConnected(false);
-    //        clearState();
-    //    }
-    //}
+    
     const handleOnMessage = e => {
         if (typeof e.data === 'object') {
             if (received_size.current === 0) {
@@ -138,7 +130,6 @@ function App() {
             setMessages([...messages, 'No connection to signal server']);
             return;
         }
-        //trace("Connect");
         connection.on("on_connected", msg => setUser({ ...user, ConnectionID: msg }));
         let peerConn = new RTCPeerConnection(servers);
         let data = await peerConn.createDataChannel("chat");
@@ -186,11 +177,12 @@ function App() {
                 peerConn.addIceCandidate(obj).catch(e => logError(e));
             }
         });
+       
         try {
             await connection.invoke("NewUser", JSON.stringify(user));
         } catch (e) {
-            logError(e);
-            setMessages([...messages, 'Connection to signal server failed']);
+                logError(e);
+                setMessages([...messages, 'Connection to signal server failed']);
         }
         const offer = await peerConn.createOffer();
         await peerConn.setLocalDescription(offer);

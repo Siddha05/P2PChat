@@ -2,17 +2,7 @@ import { useRef, useState} from 'react';
 import propTypes from 'prop-types';
 
 function ChatControls({ text, onTextChanged, onSend, onConnect, isConnect, isConnecting, onDisconnect, onSendFile}) {
-    //const [file, setFile] = useState(null);
     const file_input = useRef(null);
-
-    //const handleOnFileSelect = (e) => {
-    //    if (e.files[0]) {
-    //        setFile(e.files[0]);
-    //    }
-    //    else {
-    //        setFile(null);
-    //    }
-    //}
 
     return (
       <div style={{

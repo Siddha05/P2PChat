@@ -8,11 +8,13 @@ namespace P2PChat.Server.Hubs
     {
         ILogger<SignalHub> _logger;
 
+
+        //Для поддержки множества пользователей для их попарного соединения необходимо хранить информацию о пользователях и их ConnectionID
+        //предполагаем, что у нас могут присоединиться только 2 и не храним никакой информации
         public async Task NewUser(string user)
         {
-            //var user = new ChatUser { Name = user, ConnectionID = Context.ConnectionId };
-            await Groups.AddToGroupAsync(Context.ConnectionId, "1122");
-            await Clients.OthersInGroup("1122").SendAsync("on_user_add", user);
+            await Groups.AddToGroupAsync(Context.ConnectionId, "SweetPair");
+            await Clients.OthersInGroup("SweetPair").SendAsync("on_user_add", user);
             _logger.LogInformation($"User connected {user}");
         }
 
@@ -20,7 +22,7 @@ namespace P2PChat.Server.Hubs
         public async Task SendSignal(string signal)
         {
             _logger.LogWarning($"Got signal {signal}");
-            await Clients.OthersInGroup("1122").SendAsync("on_signal", signal);
+            await Clients.OthersInGroup("SweetPair").SendAsync("on_signal", signal);
         }
 
         public override async Task OnConnectedAsync()
